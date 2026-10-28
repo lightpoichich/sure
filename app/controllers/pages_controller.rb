@@ -552,7 +552,9 @@ class PagesController < ApplicationController
         .sort_by { |ct| -ct.total }
         .map do |ct|
           {
-            id: ct.category.id,
+            # Synthetic categories (Uncategorized, Other investments) have no
+            # id; the netting key names them, so each segment has one.
+            id: IncomeStatement::CategoryNetting.key(ct.category),
             name: ct.category.name,
             filter_value: ct.category.filter_value,
             amount: ct.total.to_f.round(2),

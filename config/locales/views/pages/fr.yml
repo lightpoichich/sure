@@ -110,7 +110,9 @@ fr:
         filter_accounts_all: Tous les comptes
         no_data: Aucune sortie pour ces comptes sur cette période
         search_accounts: Rechercher un compte
+        select_all: Afficher toutes les catégories
         title: Sorties
+        toggle_category: Afficher %{name}
         total_outflows: Total des sorties
         value: Valeur
         weight: Poids

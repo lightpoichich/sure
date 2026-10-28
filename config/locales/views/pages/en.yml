@@ -135,6 +135,8 @@ en:
         search_accounts: "Search accounts"
         apply: "Apply"
         no_data: "No outflows for these accounts in this period"
+        select_all: "Show all categories"
+        toggle_category: "Show %{name}"
       investment_summary:
         title: "Investments"
         total_return: "Total Return"

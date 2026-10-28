@@ -33,9 +33,14 @@ export default class extends Controller {
   // "shrink proportionally, never below text-sm".
   #minAmountFontSizePx = 14;
 
+  // Set once connect has drawn, so a segments change before that (Stimulus
+  // reports the initial value too) does not draw a second chart.
+  #connected = false;
+
   connect() {
     this.#draw();
     this.#fitAmountTargets();
+    this.#connected = true;
     document.addEventListener("turbo:load", this.#redraw);
     this.element.addEventListener("mouseleave", this.#clearSegmentHover);
     this.contentContainerTarget.addEventListener("mouseleave", this.#clearSegmentHover);
@@ -47,6 +52,7 @@ export default class extends Controller {
   }
 
   disconnect() {
+    this.#connected = false;
     this.#teardown();
     document.removeEventListener("turbo:load", this.#redraw);
     this.element.removeEventListener("mouseleave", this.#clearSegmentHover);
@@ -56,6 +62,17 @@ export default class extends Controller {
       this.#resizeObserver.disconnect();
       this.#resizeObserver = null;
     }
+  }
+
+  // Redraw when the segments change after connect, e.g. from the Outflows
+  // widget's category filter.
+  segmentsValueChanged() {
+    if (!this.#connected) return;
+
+    // A hover card may belong to a segment that is no longer drawn.
+    this.#clearSegmentHover();
+    this.#redraw();
+    this.#fitAmountTargets();
   }
 
   get #data() {
@@ -270,6 +287,10 @@ export default class extends Controller {
 
     // Use cached selection if available for better performance
     const paths = this.#visiblePaths || d3.select(this.chartContainerTarget).selectAll("path.visible-path");
+
+    // A row whose segment is not drawn (unchecked in the Outflows filter)
+    // highlights nothing rather than dimming every segment.
+    if (paths.filter(function () { return this.dataset.segmentId === segmentId; }).empty()) return;
 
     paths.style("opacity", function() {
       return this.dataset.segmentId === segmentId ? 1 : 0.3;
