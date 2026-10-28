@@ -30,6 +30,19 @@ test("builds a transactions deep link with category and date range", () => {
   );
 });
 
+test("narrows the deep link to the given accounts", () => {
+  const url = buildCategoryTransactionsUrl({
+    filterValue: "Groceries",
+    startDate: "2026-05-01",
+    endDate: "2026-05-31",
+    accountIds: ["a1", "b2"],
+  });
+  assert.equal(
+    url,
+    "/transactions?q%5Bcategories%5D%5B%5D=Groceries&q%5Bstart_date%5D=2026-05-01&q%5Bend_date%5D=2026-05-31&q%5Baccount_ids%5D%5B%5D=a1&q%5Baccount_ids%5D%5B%5D=b2",
+  );
+});
+
 test("encodes category names with special characters", () => {
   const url = buildCategoryTransactionsUrl({
     filterValue: "Food & Drink",

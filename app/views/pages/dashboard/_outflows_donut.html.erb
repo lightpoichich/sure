@@ -1,6 +1,36 @@
-<%# locals: (outflows_data:, period:) %>
+<%# locals: (outflows_data:, period:, accounts: [], account_ids: nil, view_params: {}) %>
+<%
+  # account_ids is nil when every account is shown. Drill-down links then
+  # keep the transactions page's own default, as before.
+  selected_account_ids = account_ids || accounts.map { |a| a.id.to_s }
+%>
 <div id="outflows-donut-section" class="@container">
   <div class="px-4">
+    <% if accounts.size > 1 %>
+      <div class="flex justify-end mb-4">
+        <%= render layout: "pages/dashboard/filter_popover", locals: {
+              button_text: account_ids ? t(".filter_accounts", count: account_ids.size) : t(".filter_accounts_all"),
+              search_label: t(".search_accounts"),
+              apply_text: t(".apply"),
+              hidden_fields: view_params.except(:outflows_account_ids)
+            } do %>
+          <% accounts.each do |account| %>
+            <%= render layout: "pages/dashboard/filter_popover_option", locals: {
+                  name: "outflows_account_ids[]",
+                  value: account.id,
+                  checked: selected_account_ids.include?(account.id.to_s),
+                  filter_name: account.name
+                } do %>
+              <span class="text-sm text-primary truncate"><%= account.name %></span>
+            <% end %>
+          <% end %>
+        <% end %>
+      </div>
+    <% end %>
+
+    <% if outflows_data[:categories].empty? %>
+      <p class="text-sm text-secondary py-6 text-center"><%= t(".no_data") %></p>
+    <% else %>
     <div class="flex flex-col @2xl:flex-row gap-8 items-center">
       <!-- Donut Chart -->
       <div class="w-full @2xl:w-1/3 max-w-[300px] px-4">
@@ -12,7 +42,8 @@
           data-donut-chart-hover-extension-value="3"
           data-donut-chart-enable-click-value="true"
           data-donut-chart-start-date-value="<%= period.date_range.first %>"
-          data-donut-chart-end-date-value="<%= period.date_range.last %>">
+          data-donut-chart-end-date-value="<%= period.date_range.last %>"
+          data-donut-chart-account-ids-value="<%= Array(account_ids).to_json %>">
           <div data-donut-chart-target="chartContainer" class="absolute inset-0 pointer-events-none"></div>
 
           <div data-donut-chart-target="contentContainer" class="flex justify-center items-center h-full">
@@ -90,7 +121,7 @@
             <% end %>
 
             <% if category[:clickable] != false %>
-              <%= link_to transactions_path(q: { categories: [category[:filter_value]], start_date: period.date_range.first, end_date: period.date_range.last }),
+              <%= link_to transactions_path(q: { categories: [category[:filter_value]], start_date: period.date_range.first, end_date: period.date_range.last, account_ids: account_ids }.compact),
                   class: "flex items-center justify-between mx-3 p-3 rounded-lg cursor-pointer group gap-3",
                   data: {
                     turbo_frame: "_top",
@@ -114,5 +145,6 @@
         </div>
       </div>
     </div>
+    <% end %>
   </div>
 </div>
