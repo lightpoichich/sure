@@ -137,14 +137,33 @@ class IncomeStatement::AccountSankeyTest < ActiveSupport::TestCase
     assert_balanced result
   end
 
-  test "a transfer outside the period is not drawn" do
+  test "a transfer falls in the period its money left the account" do
     savings = depository("Savings")
     transaction(@checking, -1000, @salary)
-    create_transfer(from_account: @checking, to_account: savings, amount: 300, date: @month - 1.day)
+    straddling = create_transfer(from_account: @checking, to_account: savings, amount: 300, date: @month - 1.day)
+    straddling.inflow_transaction.entry.update!(date: @month)
     result = graph
 
-    assert_nil node(result, "account_#{savings.id}")
+    assert_nil node(result, "account_#{savings.id}"), "the inflow leg alone draws nothing"
     assert_link result, "account_#{@checking.id}", "surplus_node", "1000.0"
+    assert_link graph(@month.prev_month), "account_#{@checking.id}", "account_#{savings.id}", "300.0"
+  end
+
+  test "pending matches and other transfer kinds are not drawn between accounts" do
+    savings = depository("Savings")
+    transaction(@checking, -1000, @salary)
+    pending = transfer(@checking, savings, 200)
+    pending.update!(status: "pending")
+    pending.inflow_transaction.update!(kind: "standard")
+    payment = transfer(@checking, @card, 100)
+    payment.outflow_transaction.update!(kind: "cc_payment")
+    result = graph
+
+    assert_no_link result, "account_#{@checking.id}", "account_#{savings.id}"
+    assert_no_link result, "account_#{@checking.id}", "account_#{@card.id}"
+    assert_link result, "income_uncategorized", "account_#{savings.id}", "200.0"
+    assert_link result, "account_#{@checking.id}", "surplus_node", "1000.0"
+    assert_balanced result
   end
 
   test "a category's per-account netting matches the category view" do

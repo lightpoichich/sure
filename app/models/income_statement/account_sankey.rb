@@ -29,15 +29,15 @@ class IncomeStatement::AccountSankey
     income = flows.sum { |flow| flow[:income] }.to_d
     spending = flows.sum { |flow| flow[:spending] }.to_d
     invested = flows.sum { |flow| flow[:invested] }.to_d
-    # Without transfers this is max(income, spending + invested). Money moved
-    # between accounts can make an account, or Surplus and Deficit, carry more
-    # than the family earned or spent, so percentages are of the widest node.
+    base = [ income, spending + invested ].max
+    # Money moved between accounts can make an account, or Surplus and Deficit,
+    # carry more than the family earned or spent, so their percentages are of
+    # the widest node. Without transfers this is the base above.
     nets = flows.map { |flow| account_net(flow) }
-    capacity = [ income, spending + invested, *flows.map { |flow| account_size(flow) },
-      nets.select(&:positive?).sum, -nets.select(&:negative?).sum ].max
+    capacity = [ base, *flows.map { |flow| account_size(flow) }, nets.select(&:positive?).sum, -nets.select(&:negative?).sum ].max
     unless capacity.zero?
       subcategory_flows = Hash.new(0.to_d)
-      flows.each { |flow| add_account(flow, income, spending, capacity, subcategory_flows) }
+      flows.each { |flow| add_account(flow, income, spending, base, capacity, subcategory_flows) }
       add_transfers(transfers, capacity)
       add_subcategories(subcategory_flows)
     end
@@ -70,43 +70,61 @@ class IncomeStatement::AccountSankey
       end
     end
 
-    # Net amount moved between reported accounts by funds-movement transfers,
-    # keyed [from_account_id, to_account_id]. A transfer falls in the period of
-    # its outflow leg, and both legs must sit in reported accounts: a transfer to
-    # an account left out of the report stays invisible, as before. A pending
-    # auto-match keeps both legs standard until confirmed, so it is still
-    # counted as income and spending and is not drawn here.
+    # Net amount moved between reported accounts by confirmed funds-movement
+    # transfers, keyed [from_account_id, to_account_id]. Only a transfer whose
+    # two legs are excluded from income and spending is drawn, so no amount is
+    # counted twice: a pending auto-match, or a leg still classified as income,
+    # stays where the category view puts it. Both legs must sit in reported
+    # accounts (a transfer to an account left out of the report stays
+    # invisible, as before), and a transfer falls in the period its outflow
+    # leg left the account.
     def transfer_flows
       account_ids = @statement.eligible_accounts.pluck(:id)
       return {} if account_ids.size < 2
 
       family = @statement.family
-      totals = family.transactions.visible.excluding_pending.in_period(@period)
-        .where(kind: "funds_movement", entries: { account_id: account_ids, excluded: false })
+      # The leg already in the family currency needs no rate; otherwise the
+      # outflow converts at the day's rate, 1:1 when missing, like the rest of
+      # the income statement.
+      amount = ActiveRecord::Base.sanitize_sql([ <<~SQL.squish, family.currency, family.currency ])
+        CASE
+          WHEN entries.currency = ? THEN ABS(entries.amount)
+          WHEN inflow_entries.currency = ? THEN ABS(inflow_entries.amount)
+          ELSE ABS(entries.amount * COALESCE(er.rate, 1))
+        END
+      SQL
+
+      totals = family.transactions.excluding_pending
+        .where(kind: "funds_movement", entries: { account_id: account_ids, date: @period.start_date..@period.end_date, excluded: false })
         .joins(:transfer_as_outflow)
-        .joins("JOIN entries inflow_entries ON inflow_entries.entryable_id = transfers.inflow_transaction_id AND inflow_entries.entryable_type = 'Transaction'")
+        .where(transfers: { status: "confirmed" })
+        .joins("JOIN transactions inflow_transactions ON inflow_transactions.id = transfers.inflow_transaction_id")
+        .joins("JOIN entries inflow_entries ON inflow_entries.entryable_id = inflow_transactions.id AND inflow_entries.entryable_type = 'Transaction'")
         .joins(ActiveRecord::Base.sanitize_sql([
           "LEFT JOIN exchange_rates er ON er.date = entries.date AND er.from_currency = entries.currency AND er.to_currency = ?",
           family.currency
         ]))
-        .where(inflow_entries: { account_id: account_ids, excluded: false })
+        .where(inflow_transactions: { kind: "funds_movement" }, inflow_entries: { account_id: account_ids, excluded: false })
         .group("entries.account_id", "inflow_entries.account_id")
-        .sum(Arel.sql("ABS(entries.amount * COALESCE(er.rate, 1))"))
+        .sum(Arel.sql(amount))
 
       without_cycles(net_by_pair(totals))
     end
 
-    # One direction per pair of accounts: what A sent B less what B sent A.
+    # One direction per pair of accounts: what A sent B less what B sent A,
+    # rounded to cents so a round trip at two exchange rates leaves no residue.
+    # Pairs are visited in id order, so cycle cancellation never depends on the
+    # order rows come back from the database.
     def net_by_pair(totals)
       balances = Hash.new(0.to_d)
-      totals.each do |(from, to), amount|
+      totals.sort_by(&:first).each do |(from, to), amount|
         next if from == to
 
         pair = [ from, to ].sort
         balances[pair] += pair.first == from ? amount.to_d : -amount.to_d
       end
 
-      balances.each_with_object({}) do |((first, second), amount), flows|
+      balances.transform_values { |amount| amount.round(2) }.each_with_object({}) do |((first, second), amount), flows|
         if amount.positive?
           flows[[ first, second ]] = amount
         elsif amount.negative?
@@ -162,7 +180,7 @@ class IncomeStatement::AccountSankey
       flow[:income] + flow[:transfers_in] - flow[:spending] - flow[:invested] - flow[:transfers_out]
     end
 
-    def add_account(flow, income, spending, capacity, subcategory_flows)
+    def add_account(flow, income, spending, base, capacity, subcategory_flows)
       account = flow[:account]
       size = account_size(flow)
       center = account_node(account)
@@ -189,8 +207,8 @@ class IncomeStatement::AccountSankey
       if flow[:invested].positive?
         node_invested = node("invested_node", "Invested", :invested, color: IncomeStatement::Sankey::INVESTED_COLOR)
         node_invested[:value] += flow[:invested]
-        node_invested[:percentage] = percentage(node_invested[:value], capacity)
-        link(center, node_invested, flow[:invested], percentage(flow[:invested], capacity))
+        node_invested[:percentage] = percentage(node_invested[:value], base)
+        link(center, node_invested, flow[:invested], percentage(flow[:invested], base))
       end
 
       net = account_net(flow)
