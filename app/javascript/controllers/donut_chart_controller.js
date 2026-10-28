@@ -69,6 +69,8 @@ export default class extends Controller {
   segmentsValueChanged() {
     if (!this.#connected) return;
 
+    // A hover card may belong to a segment that is no longer drawn.
+    this.#clearSegmentHover();
     this.#redraw();
     this.#fitAmountTargets();
   }
@@ -285,6 +287,10 @@ export default class extends Controller {
 
     // Use cached selection if available for better performance
     const paths = this.#visiblePaths || d3.select(this.chartContainerTarget).selectAll("path.visible-path");
+
+    // A row whose segment is not drawn (unchecked in the Outflows filter)
+    // highlights nothing rather than dimming every segment.
+    if (paths.filter(function () { return this.dataset.segmentId === segmentId; }).empty()) return;
 
     paths.style("opacity", function() {
       return this.dataset.segmentId === segmentId ? 1 : 0.3;

@@ -61,7 +61,20 @@ test("formats shares with one decimal, like the server", () => {
   assert.equal(formatPercentage(66.7), "66.7%");
 });
 
-test("formats money in the page's locale", () => {
-  assert.equal(formatMoney(3000, "USD", "en"), "$3,000.00");
-  assert.equal(formatMoney(1, "XXX-not-a-currency", "en"), "1");
+test("formats money with the server's options for en and USD", () => {
+  const usd = { unit: "$", precision: 2, delimiter: ",", separator: ".", format: "%u%n" };
+  assert.equal(formatMoney(3000, usd), "$3,000.00");
+  assert.equal(formatMoney(0, usd), "$0.00");
+  assert.equal(formatMoney(1234567.5, usd), "$1,234,567.50");
+});
+
+test("formats money with the server's options for fr and EUR", () => {
+  const eur = { unit: "€", precision: 2, delimiter: "\u00A0", separator: ",", format: "%n\u00A0%u" };
+  assert.equal(formatMoney(8487.91, eur), "8\u00A0487,91\u00A0€");
+  assert.equal(formatMoney(999, eur), "999,00\u00A0€");
+});
+
+test("formats money without decimals or with more of them", () => {
+  assert.equal(formatMoney(1234.5, { unit: "¥", precision: 0, delimiter: ",", separator: ".", format: "%u%n" }), "¥1,235");
+  assert.equal(formatMoney(0.1234, { unit: "₿", precision: 8, delimiter: ",", separator: ".", format: "%u%n" }), "₿0.12340000");
 });

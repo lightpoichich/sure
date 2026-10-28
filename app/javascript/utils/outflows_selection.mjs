@@ -21,10 +21,13 @@ export function formatPercentage(percentage) {
   return `${Number(percentage).toFixed(1)}%`;
 }
 
-export function formatMoney(amount, currency, locale) {
-  try {
-    return new Intl.NumberFormat(locale, { style: "currency", currency }).format(amount);
-  } catch {
-    return String(amount);
-  }
+// Formats like the server's Money#format (ActiveSupport number_to_currency),
+// from the options Money#format_options gives for the currency and locale:
+// unit, precision, delimiter, separator and a "%u"/"%n" format. Intl would
+// follow CLDR instead and disagree with the amounts the server rendered.
+export function formatMoney(amount, { unit, precision, delimiter, separator, format }) {
+  const [integer, fraction] = Math.abs(Number(amount)).toFixed(precision).split(".");
+  const grouped = integer.replace(/\B(?=(\d{3})+(?!\d))/g, delimiter);
+  const number = `${Number(amount) < 0 ? "-" : ""}${fraction ? `${grouped}${separator}${fraction}` : grouped}`;
+  return format.replace("%n", number).replace("%u", unit);
 }

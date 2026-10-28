@@ -5,6 +5,8 @@ class DashboardOutflowsFilterTest < ApplicationSystemTestCase
 
   setup do
     @user = users(:family_admin)
+    # The expected amounts below are the en/USD rendering.
+    @user.update!(locale: "en")
     family = @user.family
     account = family.accounts.create!(name: "Filter checking", owner: @user, currency: family.currency, balance: 0, accountable: Depository.new)
     @rent = family.categories.create!(name: "Filter rent", color: "#6471eb")
