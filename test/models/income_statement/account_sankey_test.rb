@@ -66,6 +66,106 @@ class IncomeStatement::AccountSankeyTest < ActiveSupport::TestCase
     assert_equal({ nodes: [], links: [] }, graph(Date.new(2023, 1, 1)).slice(:nodes, :links))
   end
 
+  test "a transfer between reported accounts flows from one account node to the other" do
+    joint = depository("Joint")
+    transaction(@checking, -1000, @salary)
+    transaction(@checking, 100, @shopping)
+    transfer(@checking, joint, 600)
+    transaction(joint, 500, @groceries)
+    result = graph
+
+    assert_equal "1000.0", result[:income], "a transfer is neither income"
+    assert_equal "600.0", result[:spending], "nor spending"
+    assert_link result, "account_#{@checking.id}", "account_#{joint.id}", "600.0"
+    assert_link result, "account_#{@checking.id}", "surplus_node", "300.0"
+    assert_link result, "account_#{joint.id}", "surplus_node", "100.0"
+    assert_balanced result
+  end
+
+  test "savings drawn down feed their account through Deficit, then flow on to the accounts they paid" do
+    savings, reserve, joint = depository("Savings"), depository("Reserve"), depository("Joint")
+    transfer(savings, @checking, 400)
+    transfer(reserve, joint, 300)
+    transaction(@checking, 150, @shopping)
+    result = graph
+
+    assert_link result, "deficit_node", "account_#{savings.id}", "400.0"
+    assert_link result, "account_#{savings.id}", "account_#{@checking.id}", "400.0"
+    assert_link result, "account_#{@checking.id}", "surplus_node", "250.0"
+    assert_equal "700.0", node(result, "deficit_node")[:value]
+    assert_equal "100.0", node(result, "deficit_node")[:percentage], "Deficit is the widest node here"
+    assert_balanced result
+  end
+
+  test "transfers both ways between two accounts are netted to one direction" do
+    savings = depository("Savings")
+    transaction(@checking, -1000, @salary)
+    transfer(@checking, savings, 500)
+    transfer(savings, @checking, 200)
+    result = graph
+
+    assert_link result, "account_#{@checking.id}", "account_#{savings.id}", "300.0"
+    assert_no_link result, "account_#{savings.id}", "account_#{@checking.id}"
+    assert_balanced result
+  end
+
+  test "a cycle of transfers is cancelled without changing what each account gains" do
+    savings, joint = depository("Savings"), depository("Joint")
+    transaction(@checking, -1000, @salary)
+    transfer(@checking, savings, 300)
+    transfer(savings, joint, 200)
+    transfer(joint, @checking, 100)
+    result = graph
+
+    assert_link result, "account_#{@checking.id}", "account_#{savings.id}", "200.0"
+    assert_link result, "account_#{savings.id}", "account_#{joint.id}", "100.0"
+    assert_no_link result, "account_#{joint.id}", "account_#{@checking.id}"
+    assert_link result, "account_#{@checking.id}", "surplus_node", "800.0"
+    assert_link result, "account_#{savings.id}", "surplus_node", "100.0"
+    assert_link result, "account_#{joint.id}", "surplus_node", "100.0"
+    assert_balanced result
+  end
+
+  test "a transfer to an account left out of reports stays invisible" do
+    hidden = depository("Hidden", exclude_from_reports: true)
+    transaction(@checking, -1000, @salary)
+    transfer(@checking, hidden, 300)
+    result = graph
+
+    assert_nil node(result, "account_#{hidden.id}")
+    assert_link result, "account_#{@checking.id}", "surplus_node", "1000.0"
+    assert_balanced result
+  end
+
+  test "a transfer falls in the period its money left the account" do
+    savings = depository("Savings")
+    transaction(@checking, -1000, @salary)
+    straddling = create_transfer(from_account: @checking, to_account: savings, amount: 300, date: @month - 1.day)
+    straddling.inflow_transaction.reload.entry.update!(date: @month)
+    result = graph
+
+    assert_nil node(result, "account_#{savings.id}"), "the inflow leg alone draws nothing"
+    assert_link result, "account_#{@checking.id}", "surplus_node", "1000.0"
+    assert_link graph(@month.prev_month), "account_#{@checking.id}", "account_#{savings.id}", "300.0"
+  end
+
+  test "pending matches and other transfer kinds are not drawn between accounts" do
+    savings = depository("Savings")
+    transaction(@checking, -1000, @salary)
+    pending = transfer(@checking, savings, 200)
+    pending.update!(status: "pending")
+    pending.inflow_transaction.update!(kind: "standard")
+    payment = transfer(@checking, @card, 100)
+    payment.outflow_transaction.update!(kind: "cc_payment")
+    result = graph
+
+    assert_no_link result, "account_#{@checking.id}", "account_#{savings.id}"
+    assert_no_link result, "account_#{@checking.id}", "account_#{@card.id}"
+    assert_link result, "income_uncategorized", "account_#{savings.id}", "200.0"
+    assert_link result, "account_#{@checking.id}", "surplus_node", "1000.0"
+    assert_balanced result
+  end
+
   test "a category's per-account netting matches the category view" do
     transaction(@checking, 120, @shopping)
     transaction(@checking, -20, @shopping)
@@ -79,6 +179,14 @@ class IncomeStatement::AccountSankeyTest < ActiveSupport::TestCase
   private
     def transaction(account, amount, category)
       create_transaction(account: account, amount: amount, category: category, date: @month)
+    end
+
+    def transfer(from, to, amount)
+      create_transfer(from_account: from, to_account: to, amount: amount, date: @month)
+    end
+
+    def depository(name, **attributes)
+      @family.accounts.create!(name: name, currency: "USD", balance: 0, accountable: Depository.new, **attributes)
     end
 
     def period(month = @month)
@@ -98,6 +206,12 @@ class IncomeStatement::AccountSankeyTest < ActiveSupport::TestCase
       link = graph[:links].find { |l| l[:source] == ids.index(source_id) && l[:target] == ids.index(target_id) }
       assert link, "expected a link #{source_id} -> #{target_id}"
       assert_equal value, link[:value]
+    end
+
+    def assert_no_link(graph, source_id, target_id)
+      ids = graph[:nodes].map { |node| node[:id] }
+      assert_not graph[:links].any? { |l| l[:source] == ids.index(source_id) && l[:target] == ids.index(target_id) },
+        "expected no link #{source_id} -> #{target_id}"
     end
 
     # Every account balances, and every node's value is its larger side.
