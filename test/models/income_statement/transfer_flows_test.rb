@@ -33,6 +33,14 @@ class IncomeStatement::TransferFlowsTest < ActiveSupport::TestCase
     assert_empty flows.sent_outside([ @checking.id ])
   end
 
+  test "payments to a card count only when asked for" do
+    card = @family.accounts.create!(name: "Card", currency: "USD", balance: 0, accountable: CreditCard.new)
+    transfer(@checking, card, 800).outflow_transaction.update!(kind: "cc_payment")
+
+    assert_empty flows.sent_outside([ @checking.id ])
+    assert_equal({ card.id => 800.to_d }, flows(outflow_kinds: %w[funds_movement cc_payment]).sent_outside([ @checking.id ]))
+  end
+
   test "pending matches and transfers outside the period are left out" do
     transfer(@checking, @joint, 300).update!(status: "pending")
     create_transfer(from_account: @checking, to_account: @savings, amount: 200, date: @month - 1.day)
@@ -45,7 +53,7 @@ class IncomeStatement::TransferFlowsTest < ActiveSupport::TestCase
       create_transfer(from_account: from, to_account: to, amount: amount, date: @month)
     end
 
-    def flows
-      IncomeStatement::TransferFlows.new(IncomeStatement.new(@family), period: Period.custom(start_date: @month, end_date: @month.end_of_month))
+    def flows(**options)
+      IncomeStatement::TransferFlows.new(IncomeStatement.new(@family), period: Period.custom(start_date: @month, end_date: @month.end_of_month), **options)
     end
 end

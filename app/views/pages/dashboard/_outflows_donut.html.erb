@@ -14,7 +14,7 @@
               apply_text: t(".apply"),
               hidden_fields: view_params.except(:outflows_account_ids)
             } do %>
-          <% accounts.each do |account| %>
+          <% accounts.sort_by(&:name).each do |account| %>
             <%= render layout: "pages/dashboard/filter_popover_option", locals: {
                   name: "outflows_account_ids[]",
                   value: account.id,

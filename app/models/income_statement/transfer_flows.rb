@@ -1,6 +1,8 @@
 # Money moved between the accounts an income statement reports on, by
 # confirmed funds-movement transfers. Income and spending leave these out; the
-# account views use them to show where money went between accounts.
+# account views use them to show where money went between accounts. A caller
+# can also count payments to credit cards and other liabilities (cc_payment
+# outflow legs), which income and spending leave out too.
 #
 # Only a transfer whose two legs are excluded from income and spending counts,
 # so no amount is counted twice: a pending auto-match, or a leg still
@@ -9,8 +11,12 @@
 # stays invisible), and a transfer falls in the period its outflow leg left the
 # account.
 class IncomeStatement::TransferFlows
-  def initialize(statement, period:)
-    @statement, @period = statement, period
+  OUTFLOW_KINDS = %w[funds_movement cc_payment].freeze
+
+  def initialize(statement, period:, outflow_kinds: %w[funds_movement])
+    raise ArgumentError, "unsupported outflow kinds: #{outflow_kinds}" unless (outflow_kinds - OUTFLOW_KINDS).empty?
+
+    @statement, @period, @outflow_kinds = statement, period, outflow_kinds
   end
 
   # Gross amounts keyed [from_account_id, to_account_id].
@@ -60,7 +66,7 @@ class IncomeStatement::TransferFlows
       SQL
 
       family.transactions.excluding_pending
-        .where(kind: "funds_movement", entries: { account_id: account_ids, date: @period.start_date..@period.end_date, excluded: false })
+        .where(kind: @outflow_kinds, entries: { account_id: account_ids, date: @period.start_date..@period.end_date, excluded: false })
         .joins(:transfer_as_outflow)
         .where(transfers: { status: "confirmed" })
         .joins("JOIN transactions inflow_transactions ON inflow_transactions.id = transfers.inflow_transaction_id")

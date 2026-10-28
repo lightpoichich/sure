@@ -140,6 +140,12 @@ class PagesController < ApplicationController
     # against the family's categories, so its queries still never run.
     def dashboard_view_params
       view_params = params.permit(*DASHBOARD_VIEW_PARAMS).to_h
+      # Same for the outflows accounts: every account selected is no filter,
+      # and must not become one when an account is added later.
+      if view_params.key?(:outflows_account_ids)
+        account_ids = outflows_account_ids_param(dashboard_income_statement.eligible_accounts)
+        account_ids ? view_params[:outflows_account_ids] = account_ids : view_params.delete(:outflows_account_ids)
+      end
       if view_params.key?(:spending_category_ids)
         category_ids = Current.user.dashboard_hidden_sections.include?("spending_trend") ? spending_trend_category_ids_param : spending_trend_filter.category_ids
         category_ids ? view_params[:spending_category_ids] = category_ids : view_params.delete(:spending_category_ids)
@@ -568,13 +574,15 @@ class PagesController < ApplicationController
     def build_account_outflows_donut_data(accounts, account_ids)
       statement = Current.family.income_statement(user: Current.user, accounts: accounts.where(id: account_ids))
       data = build_outflows_donut_data(statement.net_category_totals(period: @period))
-      sent = IncomeStatement::TransferFlows.new(dashboard_income_statement, period: @period).sent_outside(account_ids)
+      sent = IncomeStatement::TransferFlows.new(dashboard_income_statement, period: @period, outflow_kinds: IncomeStatement::TransferFlows::OUTFLOW_KINDS)
+        .sent_outside(account_ids)
       return data if sent.empty?
 
       names = accounts.where(id: sent.keys).pluck(:id, :name).to_h { |id, name| [ id.to_s, name ] }
-      slices = sent.map do |account_id, amount|
+      colors = [ Category::TRANSFER_COLOR, *Category::COLORS ]
+      slices = sent.sort_by { |account_id, _| names.fetch(account_id) }.each_with_index.map do |(account_id, amount), index|
         { id: "account_#{account_id}", name: names.fetch(account_id), filter_value: nil, amount: amount.to_f.round(2),
-          currency: data[:currency], percentage: 0, color: Category::TRANSFER_COLOR, icon: "arrow-right-left", clickable: false }
+          currency: data[:currency], percentage: 0, color: colors[index % colors.size], icon: "arrow-right-left", clickable: false }
       end
       total = (data[:total] + slices.sum { |slice| slice[:amount] }).round(2)
       categories = (data[:categories] + slices).sort_by { |slice| -slice[:amount] }.map do |slice|

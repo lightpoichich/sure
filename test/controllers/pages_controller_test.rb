@@ -231,14 +231,31 @@ class PagesControllerTest < ActionDispatch::IntegrationTest
     create_transfer(from_account: personal, to_account: joint, amount: 300, date: Date.current, currency: @family.currency)
 
     get root_path
+    assert_select "#outflows-donut-section"
     assert_select "#outflows-donut-section [data-category-id='account_#{joint.id}']", count: 0
 
     get root_path(outflows_account_ids: [ personal.id ])
     assert_response :ok
-    assert_select "#outflows-donut-section [data-category-id='account_#{joint.id}']", text: /Joint/
+    # 300 sent to Joint and 40 spent on food: 340 in all.
+    assert_select "#outflows-donut-section [data-category-id='account_#{joint.id}']" do
+      assert_select "*", text: /Joint/
+      assert_select "*", text: /300\.00/
+      assert_select "*", text: /88\.2%/
+    end
     assert_select "#outflows-donut-section input[type='checkbox'][name='outflows_account_ids[]'][value='#{personal.id}'][checked]"
     assert_select "#outflows-donut-section input[type='checkbox'][name='outflows_account_ids[]'][value='#{joint.id}']:not([checked])"
     assert_select "#outflows-donut-section a[href*='account_ids']"
+  end
+
+  test "selecting every account is the unfiltered widget, and is not carried along" do
+    personal = @family.accounts.create!(name: "Personal", owner: @user, currency: @family.currency, balance: 0, accountable: Depository.new)
+    create_transaction(account: personal, amount: 40, category: categories(:food_and_drink), date: Date.current, currency: @family.currency)
+
+    get root_path(outflows_account_ids: IncomeStatement.new(@family, user: @user).eligible_accounts.pluck(:id))
+    assert_response :ok
+    assert_select "#outflows-donut-section", text: /#{I18n.t("pages.dashboard.outflows_donut.filter_accounts_all")}/
+    assert_select "#outflows-donut-section", text: /Filter accounts \(/, count: 0
+    assert_select "#money-flow-section form input[type='hidden'][name='outflows_account_ids[]']", count: 0
   end
 
   test "the outflows account filter and the other widgets keep each other's state" do
