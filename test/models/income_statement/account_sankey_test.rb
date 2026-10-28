@@ -141,7 +141,7 @@ class IncomeStatement::AccountSankeyTest < ActiveSupport::TestCase
     savings = depository("Savings")
     transaction(@checking, -1000, @salary)
     straddling = create_transfer(from_account: @checking, to_account: savings, amount: 300, date: @month - 1.day)
-    straddling.inflow_transaction.entry.update!(date: @month)
+    straddling.inflow_transaction.reload.entry.update!(date: @month)
     result = graph
 
     assert_nil node(result, "account_#{savings.id}"), "the inflow leg alone draws nothing"
