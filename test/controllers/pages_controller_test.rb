@@ -245,6 +245,9 @@ class PagesControllerTest < ActionDispatch::IntegrationTest
     assert_select "#outflows-donut-section input[type='checkbox'][name='outflows_account_ids[]'][value='#{personal.id}'][checked]"
     assert_select "#outflows-donut-section input[type='checkbox'][name='outflows_account_ids[]'][value='#{joint.id}']:not([checked])"
     assert_select "#outflows-donut-section a[href*='account_ids']"
+    # One live checkbox per slice, plus the select-all one.
+    assert_select "#outflows-donut-section input[data-outflows-filter-target='checkbox'][value='account_#{joint.id}'][checked]"
+    assert_select "#outflows-donut-section input[data-outflows-filter-target='all'][checked]"
   end
 
   test "selecting every account is the unfiltered widget, and is not carried along" do

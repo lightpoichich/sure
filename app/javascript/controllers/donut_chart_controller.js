@@ -33,9 +33,14 @@ export default class extends Controller {
   // "shrink proportionally, never below text-sm".
   #minAmountFontSizePx = 14;
 
+  // Set once connect has drawn, so a segments change before that (Stimulus
+  // reports the initial value too) does not draw a second chart.
+  #connected = false;
+
   connect() {
     this.#draw();
     this.#fitAmountTargets();
+    this.#connected = true;
     document.addEventListener("turbo:load", this.#redraw);
     this.element.addEventListener("mouseleave", this.#clearSegmentHover);
     this.contentContainerTarget.addEventListener("mouseleave", this.#clearSegmentHover);
@@ -47,6 +52,7 @@ export default class extends Controller {
   }
 
   disconnect() {
+    this.#connected = false;
     this.#teardown();
     document.removeEventListener("turbo:load", this.#redraw);
     this.element.removeEventListener("mouseleave", this.#clearSegmentHover);
@@ -56,6 +62,15 @@ export default class extends Controller {
       this.#resizeObserver.disconnect();
       this.#resizeObserver = null;
     }
+  }
+
+  // Redraw when the segments change after connect, e.g. from the Outflows
+  // widget's category filter.
+  segmentsValueChanged() {
+    if (!this.#connected) return;
+
+    this.#redraw();
+    this.#fitAmountTargets();
   }
 
   get #data() {
