@@ -30,7 +30,7 @@ class PagesController < ApplicationController
   # anywhere. Customize mode, the period picker and each widget's own month
   # links and filter forms carry them along, so changing one control doesn't
   # jump the other widgets back to their defaults.
-  DASHBOARD_VIEW_PARAMS = [ :start_date, :end_date, :money_flow_month, :spending_month, { money_flow_account_ids: [], spending_category_ids: [] } ].freeze
+  DASHBOARD_VIEW_PARAMS = [ :start_date, :end_date, :money_flow_month, :spending_month, { money_flow_account_ids: [], spending_category_ids: [], outflows_account_ids: [] } ].freeze
 
   # Selectable height presets (px) for grow widgets.
   DASHBOARD_HEIGHT_PRESETS = { "compact" => 208, "auto" => 288, "tall" => 416 }.freeze
@@ -140,6 +140,12 @@ class PagesController < ApplicationController
     # against the family's categories, so its queries still never run.
     def dashboard_view_params
       view_params = params.permit(*DASHBOARD_VIEW_PARAMS).to_h
+      # Same for the outflows accounts: every account selected is no filter,
+      # and must not become one when an account is added later.
+      if view_params.key?(:outflows_account_ids)
+        account_ids = outflows_account_ids_param(dashboard_income_statement.eligible_accounts)
+        account_ids ? view_params[:outflows_account_ids] = account_ids : view_params.delete(:outflows_account_ids)
+      end
       if view_params.key?(:spending_category_ids)
         category_ids = Current.user.dashboard_hidden_sections.include?("spending_trend") ? spending_trend_category_ids_param : spending_trend_filter.category_ids
         category_ids ? view_params[:spending_category_ids] = category_ids : view_params.delete(:spending_category_ids)
@@ -199,14 +205,17 @@ class PagesController < ApplicationController
           }
         },
         "outflows_donut" => -> {
-          outflows_data = build_outflows_donut_data(dashboard_net_totals)
+          accounts = dashboard_income_statement.eligible_accounts
+          account_ids = outflows_account_ids_param(accounts)
+          outflows_data = account_ids ? build_account_outflows_donut_data(accounts, account_ids) : build_outflows_donut_data(dashboard_net_totals)
           {
             key: "outflows_donut",
             title: "pages.dashboard.outflows_donut.title",
             partial: "pages/dashboard/outflows_donut",
             layout: section_layout("outflows_donut"),
-            locals: { outflows_data: outflows_data, period: @period },
-            visible: @accounts.any? && outflows_data[:categories].present?,
+            locals: { outflows_data: outflows_data, period: @period, accounts: accounts, account_ids: account_ids, view_params: @dashboard_view_params },
+            # A filtered widget stays, even empty, so its filter can be undone.
+            visible: @accounts.any? && (outflows_data[:categories].present? || account_ids.present?),
             collapsible: true
           }
         },
@@ -556,6 +565,37 @@ class PagesController < ApplicationController
         end
 
       { categories: categories, total: total.to_f.round(2), currency: net_totals.currency, currency_symbol: currency_symbol }
+    end
+
+    # Outflows of the selected accounts only. Money they sent to a reported
+    # account outside the selection left them too, so it is one slice named
+    # after that account (a personal account's contribution to a joint one);
+    # transfers between two selected accounts cancel out.
+    def build_account_outflows_donut_data(accounts, account_ids)
+      statement = Current.family.income_statement(user: Current.user, accounts: accounts.where(id: account_ids))
+      data = build_outflows_donut_data(statement.net_category_totals(period: @period))
+      sent = IncomeStatement::TransferFlows.new(dashboard_income_statement, period: @period, outflow_kinds: IncomeStatement::TransferFlows::OUTFLOW_KINDS)
+        .sent_outside(account_ids)
+      return data if sent.empty?
+
+      names = accounts.where(id: sent.keys).pluck(:id, :name).to_h { |id, name| [ id.to_s, name ] }
+      colors = [ Category::TRANSFER_COLOR, *Category::COLORS ]
+      slices = sent.sort_by { |account_id, _| names.fetch(account_id) }.each_with_index.map do |(account_id, amount), index|
+        { id: "account_#{account_id}", name: names.fetch(account_id), filter_value: nil, amount: amount.to_f.round(2),
+          currency: data[:currency], percentage: 0, color: colors[index % colors.size], icon: "arrow-right-left", clickable: false }
+      end
+      total = (data[:total] + slices.sum { |slice| slice[:amount] }).round(2)
+      categories = (data[:categories] + slices).sort_by { |slice| -slice[:amount] }.map do |slice|
+        slice.merge(percentage: total.zero? ? 0 : (slice[:amount] / total * 100).round(1))
+      end
+      data.merge(categories: categories, total: total)
+    end
+
+    # nil is the unfiltered widget: no selection, or every eligible account.
+    def outflows_account_ids_param(eligible_accounts)
+      eligible_ids = eligible_accounts.map { |a| a.id.to_s }
+      ids = Array(params[:outflows_account_ids]).reject(&:blank?).map(&:to_s) & eligible_ids
+      ids.presence unless ids.sort == eligible_ids.sort
     end
 
     def money_flow_month_param

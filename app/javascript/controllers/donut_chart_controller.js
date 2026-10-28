@@ -16,6 +16,7 @@ export default class extends Controller {
     enableClick: { type: Boolean, default: false },
     startDate: String,
     endDate: String,
+    accountIds: { type: Array, default: [] },
   };
 
   #viewBoxSize = 100;
@@ -258,6 +259,7 @@ export default class extends Controller {
         filterValue: segment.filter_value,
         startDate: this.startDateValue,
         endDate: this.endDateValue,
+        accountIds: this.accountIdsValue,
       }),
     );
   }

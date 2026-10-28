@@ -130,6 +130,11 @@ en:
         categories: "Categories"
         value: "Value"
         weight: "Weight"
+        filter_accounts: "Filter accounts (%{count})"
+        filter_accounts_all: "All accounts"
+        search_accounts: "Search accounts"
+        apply: "Apply"
+        no_data: "No outflows for these accounts in this period"
       investment_summary:
         title: "Investments"
         total_return: "Total Return"

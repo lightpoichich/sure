@@ -104,7 +104,12 @@ fr:
         description: Ajoutez des comptes pour afficher les données de patrimoine net
         title: Pas encore de comptes
       outflows_donut:
+        apply: Appliquer
         categories: Catégories
+        filter_accounts: Filtrer les comptes (%{count})
+        filter_accounts_all: Tous les comptes
+        no_data: Aucune sortie pour ces comptes sur cette période
+        search_accounts: Rechercher un compte
         title: Sorties
         total_outflows: Total des sorties
         value: Valeur

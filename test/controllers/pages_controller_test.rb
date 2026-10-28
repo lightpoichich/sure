@@ -224,6 +224,52 @@ class PagesControllerTest < ActionDispatch::IntegrationTest
     assert_nil period_link["end_date"]
   end
 
+  test "outflows filtered to some accounts show what they sent the other accounts as one slice" do
+    personal = @family.accounts.create!(name: "Personal", owner: @user, currency: @family.currency, balance: 0, accountable: Depository.new)
+    joint = @family.accounts.create!(name: "Joint", owner: @user, currency: @family.currency, balance: 0, accountable: Depository.new)
+    create_transaction(account: personal, amount: 40, category: categories(:food_and_drink), date: Date.current, currency: @family.currency)
+    create_transfer(from_account: personal, to_account: joint, amount: 300, date: Date.current, currency: @family.currency)
+
+    get root_path
+    assert_select "#outflows-donut-section"
+    assert_select "#outflows-donut-section [data-category-id='account_#{joint.id}']", count: 0
+
+    get root_path(outflows_account_ids: [ personal.id ])
+    assert_response :ok
+    # 300 sent to Joint and 40 spent on food: 340 in all.
+    assert_select "#outflows-donut-section [data-category-id='account_#{joint.id}']" do
+      assert_select "*", text: /Joint/
+      assert_select "*", text: /300\.00/
+      assert_select "*", text: /88\.2%/
+    end
+    assert_select "#outflows-donut-section input[type='checkbox'][name='outflows_account_ids[]'][value='#{personal.id}'][checked]"
+    assert_select "#outflows-donut-section input[type='checkbox'][name='outflows_account_ids[]'][value='#{joint.id}']:not([checked])"
+    assert_select "#outflows-donut-section a[href*='account_ids']"
+  end
+
+  test "selecting every account is the unfiltered widget, and is not carried along" do
+    personal = @family.accounts.create!(name: "Personal", owner: @user, currency: @family.currency, balance: 0, accountable: Depository.new)
+    create_transaction(account: personal, amount: 40, category: categories(:food_and_drink), date: Date.current, currency: @family.currency)
+
+    get root_path(outflows_account_ids: IncomeStatement.new(@family, user: @user).eligible_accounts.pluck(:id))
+    assert_response :ok
+    assert_select "#outflows-donut-section", text: /#{I18n.t("pages.dashboard.outflows_donut.filter_accounts_all")}/
+    assert_select "#outflows-donut-section", text: /Filter accounts \(/, count: 0
+    assert_select "#money-flow-section form input[type='hidden'][name='outflows_account_ids[]']", count: 0
+  end
+
+  test "the outflows account filter and the other widgets keep each other's state" do
+    account = @family.accounts.create!(name: "Personal", owner: @user, currency: @family.currency, balance: 0, accountable: Depository.new)
+    money_flow_month = 1.month.ago.beginning_of_month.to_date.iso8601
+
+    get root_path(outflows_account_ids: [ account.id ], money_flow_month: money_flow_month)
+    assert_response :ok
+
+    assert_select "#money-flow-section form input[type='hidden'][name='outflows_account_ids[]'][value='#{account.id}']"
+    assert_select "#outflows-donut-section form input[type='hidden'][name='money_flow_month'][value='#{money_flow_month}']"
+    assert_select "#outflows-donut-section form input[type='hidden'][name='outflows_account_ids[]']", count: 0
+  end
+
   test "customize mode focuses the widget that was just added back, or its re-add button once hidden" do
     @user.update_dashboard_section_hidden("net_worth_chart", true)
 

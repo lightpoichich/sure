@@ -6,8 +6,9 @@ export function isNavigableCategoryNode(id) {
 }
 
 // Builds a relative deep link to the transactions index, filtered by a single
-// category and (optionally) a start/end date range. Mirrors the params the
-// transactions search form submits: q[categories][], q[start_date], q[end_date].
+// category and (optionally) a start/end date range and a set of accounts.
+// Mirrors the params the transactions search form submits: q[categories][],
+// q[start_date], q[end_date], q[account_ids][].
 //
 // filterValue must be the category's stable filter value (Category#filter_value:
 // the persisted name for a real category, or Category::UNCATEGORIZED_FILTER_VALUE
@@ -18,11 +19,13 @@ export function buildCategoryTransactionsUrl({
   filterValue,
   startDate,
   endDate,
+  accountIds = [],
   basePath = "/transactions",
 }) {
   const params = new URLSearchParams();
   params.append("q[categories][]", filterValue);
   if (startDate) params.append("q[start_date]", startDate);
   if (endDate) params.append("q[end_date]", endDate);
+  for (const accountId of accountIds) params.append("q[account_ids][]", accountId);
   return `${basePath}?${params.toString()}`;
 }
